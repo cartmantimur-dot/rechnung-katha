@@ -105,6 +105,50 @@ async function testSupabase() {
     else el.textContent = 'Fehler: ' + (res.error || 'Unbekannt')
   }
 }
+async function sbUpsertInventory(it) {
+  const s = await getSupabase(); if (!s) return
+  await s.from('inventory').upsert({ id: it.id, name: it.name, price: it.price, stock: it.stock, photo_url: it.photoUrl || null }, { onConflict: 'id' })
+}
+async function sbUpsertReceipt(rec) {
+  const s = await getSupabase(); if (!s) return
+  await s.from('receipts').upsert({ id: rec.id, vendor: rec.vendor, amount: rec.amount, date: rec.date, image_url: rec.imageUrl || null }, { onConflict: 'id' })
+}
+async function sbNextInvoiceNumber() {
+  const s = await getSupabase(); if (!s) return null
+  const { data } = await s.from('invoices').select('number').order('number', { ascending: false }).limit(1)
+  const max = data && data[0] && data[0].number ? Number(data[0].number) : 0
+  return max + 1
+}
+async function sbUpsertInvoice(inv) {
+  const s = await getSupabase(); if (!s) return
+  await s.from('invoices').upsert({ id: inv.id, customer: inv.customer, date: inv.date, total: inv.total, number: inv.number || null }, { onConflict: 'id' })
+  const rows = inv.items.map(it => ({ invoice_id: inv.id, item_id: it.id, name: it.name, qty: it.qty, price: it.price, total: it.total }))
+  if (rows.length) await s.from('invoice_items').upsert(rows, { onConflict: 'invoice_id,item_id' })
+}
+async function syncFromCloud() {
+  const s = await getSupabase(); if (!s) return
+  const invRes = await s.from('inventory').select('*')
+  if (invRes.data) {
+    for (const r of invRes.data) {
+      await put(stores.inventory, { id: r.id, name: r.name, price: r.price, stock: r.stock, photoUrl: r.photo_url || null })
+    }
+  }
+  const recRes = await s.from('receipts').select('*')
+  if (recRes.data) {
+    for (const r of recRes.data) {
+      await put(stores.receipts, { id: r.id, vendor: r.vendor, amount: r.amount, date: r.date, imageUrl: r.image_url || null })
+    }
+  }
+  const invs = await s.from('invoices').select('*')
+  const items = await s.from('invoice_items').select('*')
+  if (invs.data) {
+    for (const inv of invs.data) {
+      const its = (items.data || []).filter(x => x.invoice_id === inv.id).map(x => ({ id: x.item_id, name: x.name, qty: x.qty, price: x.price, total: x.total }))
+      await put(stores.invoices, { id: inv.id, customer: inv.customer, date: inv.date, total: inv.total, number: inv.number, items: its })
+    }
+  }
+  await renderInventory(); await renderInvoices(); await renderReceipts()
+}
 function decodeJwt(token) {
   try {
     const base64Url = token.split('.')[1]
@@ -135,7 +179,7 @@ function invoiceRow(inv) {
   el.className = 'row'
   const t = document.createElement('div')
   t.className = 'title'
-  t.textContent = inv.customer + ' • ' + fmtMoney(inv.total)
+  t.textContent = (inv.number ? ('Re ' + inv.number + ' • ') : '') + inv.customer + ' • ' + fmtMoney(inv.total)
   const a = document.createElement('div')
   const p = document.createElement('button')
   p.textContent = 'Drucken'
@@ -231,7 +275,12 @@ function newInvoiceForm() {
   save.textContent = 'Speichern'
   save.onclick = async () => {
     const inv = await buildInvoice(customer, date, itemsList)
+    const remoteNo = await sbNextInvoiceNumber()
+    const nextNoLocal = (await getSetting('nextInvoiceNumber')) || 1
+    inv.number = remoteNo || nextNoLocal
+    await setSetting('nextInvoiceNumber', inv.number + 1)
     await put(stores.invoices, inv)
+    await sbUpsertInvoice(inv)
     for (const it of inv.items) {
       const cur = await new Promise((resolve, reject) => {
         const t = db.transaction(stores.inventory, 'readonly')
@@ -377,6 +426,7 @@ async function editItem(item) {
     await put(stores.inventory, it)
     const url = await uploadToBucket(buckets.inventory, 'items/' + it.id + '.jpg', it.photo)
     if (url) await put(stores.inventory, { ...it, photoUrl: url })
+    await sbUpsertInventory({ ...it, photoUrl: url || it.photoUrl })
     $('#modal').classList.add('hidden')
     await renderInventory()
   }
@@ -403,6 +453,7 @@ function newItemForm() {
     await put(stores.inventory, it)
     const url = await uploadToBucket(buckets.inventory, 'items/' + it.id + '.jpg', it.photo)
     if (url) await put(stores.inventory, { ...it, photoUrl: url })
+    await sbUpsertInventory({ ...it, photoUrl: url || it.photoUrl })
     $('#modal').classList.add('hidden')
     await renderInventory()
   }
@@ -431,6 +482,7 @@ async function handleReceiptFile(file) {
     await put(stores.receipts, rec)
     const url = await uploadToBucket(buckets.receipts, 'receipts/' + rec.id + '.jpg', rec.blob)
     if (url) await put(stores.receipts, { ...rec, imageUrl: url })
+    await sbUpsertReceipt({ ...rec, imageUrl: url || rec.imageUrl })
     $('#modal').classList.add('hidden')
     await renderReceipts()
   }
@@ -443,13 +495,20 @@ async function printInvoice(inv) {
   const name = (await getSetting('businessName')) || 'Fräulein Franken'
   const tagline = (await getSetting('tagline')) || 'Geschenke für dich'
   const address = (await getSetting('address')) || 'Kölner Str. 13, 50226 Frechen'
+  const iban = (await getSetting('iban')) || ''
+  const email = (await getSetting('email')) || ''
+  const phone = (await getSetting('phone')) || ''
   const logoUrl = '/logo.png'
   w.document.write('<html><head><title>Rechnung</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>body{font-family:system-ui;padding:24px}header{display:flex;gap:16px;align-items:center;margin-bottom:16px}header img{width:96px;height:96px;object-fit:contain}h1{margin:0 0 6px}small{color:#666}table{width:100%;border-collapse:collapse;margin-top:10px}td,th{border:1px solid #ddd;padding:8px;text-align:left}footer{margin-top:18px;color:#333}</style></head><body>')
   w.document.write('<header>')
   w.document.write('<img src="' + logoUrl + '" alt="Logo">')
-  w.document.write('<div><h1>' + name + '</h1><small>' + tagline + '</small><div>' + address + '</div></div>')
+  w.document.write('<div><h1>' + name + '</h1><small>' + tagline + '</small><div>' + address + '</div>')
+  if (email) w.document.write('<div>E-Mail: ' + email + '</div>')
+  if (phone) w.document.write('<div>Telefon: ' + phone + '</div>')
+  if (iban) w.document.write('<div>IBAN: ' + iban + '</div>')
+  w.document.write('</div>')
   w.document.write('</header>')
-  w.document.write('<div><b>Rechnung</b></div>')
+  w.document.write('<div><b>Rechnung' + (inv.number ? ' #' + inv.number : '') + '</b></div>')
   w.document.write('<div>Kunde: ' + inv.customer + '</div>')
   w.document.write('<div>Datum: ' + new Date(inv.date).toLocaleDateString('de-DE') + '</div>')
   w.document.write('<table><thead><tr><th>Position</th><th>Menge</th><th>Einzelpreis</th><th>Summe</th></tr></thead><tbody>')
@@ -530,6 +589,9 @@ function bindUI() {
     await setSetting('businessName', $('#biz-name').value.trim())
     await setSetting('tagline', $('#biz-tagline').value.trim())
     await setSetting('address', $('#biz-address').value.trim())
+    await setSetting('iban', $('#biz-iban').value.trim())
+    await setSetting('email', $('#biz-email').value.trim())
+    await setSetting('phone', $('#biz-phone').value.trim())
   }
   $('#sb-save').onclick = async () => {
     await setSetting('sbUrl', $('#sb-url').value.trim())
@@ -538,6 +600,7 @@ function bindUI() {
     sbClient = null
   }
   $('#sb-test').onclick = () => testSupabase()
+  $('#sync-cloud').onclick = () => syncFromCloud()
 }
 async function init() {
   db = await openDB()
@@ -547,6 +610,7 @@ async function init() {
   await bootstrapSupabaseFromQuery()
   await seedDefaults()
   await loadSettings()
+  await syncFromCloud()
   await renderInventory(); await renderInvoices(); await renderReceipts()
 }
 async function bootstrapSupabaseFromQuery() {
@@ -582,6 +646,9 @@ async function loadSettings() {
   $('#biz-name').value = (await getSetting('businessName')) || ''
   $('#biz-tagline').value = (await getSetting('tagline')) || ''
   $('#biz-address').value = (await getSetting('address')) || ''
+  $('#biz-iban').value = (await getSetting('iban')) || ''
+  $('#biz-email').value = (await getSetting('email')) || ''
+  $('#biz-phone').value = (await getSetting('phone')) || ''
   $('#sb-url').value = (await getSetting('sbUrl')) || ''
   $('#sb-key').value = (await getSetting('sbKey')) || ''
   const proj = await getSetting('sbProject')
