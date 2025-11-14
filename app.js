@@ -3,6 +3,9 @@ const $$ = s => Array.from(document.querySelectorAll(s))
 const state = { ready: false }
 const stores = { invoices: 'invoices', inventory: 'inventory', receipts: 'receipts', customers: 'customers', settings: 'settings', assets: 'assets' }
 const buckets = { inventory: 'inventory', receipts: 'receipts' }
+const DEFAULT_SB_URL = 'https://xqqrdaasxrebayfuqhhs.supabase.co'
+const DEFAULT_SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhxcXJkYWFzeHJlYmF5ZnVxaGhzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjMxMTcxNjksImV4cCI6MjA3ODY5MzE2OX0.GxwUlO0Wbr_2XcKWgyztyYcWZcTWwEJ2w9UEtn_n4pM'
+const DEFAULT_SB_PROJECT = 'Rechnung Katha'
 let db
 async function openDB() {
   return new Promise((resolve, reject) => {
@@ -43,9 +46,12 @@ function fmtMoney(n) { return Intl.NumberFormat('de-DE', { style: 'currency', cu
 let sbClient
 async function getSupabase() {
   if (sbClient) return sbClient
-  const url = await getSetting('sbUrl')
-  const key = await getSetting('sbKey')
-  if (!url || !key) return null
+  let url = await getSetting('sbUrl')
+  let key = await getSetting('sbKey')
+  if (!url) { await setSetting('sbUrl', DEFAULT_SB_URL); url = DEFAULT_SB_URL }
+  if (!key) { await setSetting('sbKey', DEFAULT_SB_KEY); key = DEFAULT_SB_KEY }
+  const proj = await getSetting('sbProject')
+  if (!proj) await setSetting('sbProject', DEFAULT_SB_PROJECT)
   const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm')
   sbClient = createClient(url, key)
   return sbClient
@@ -532,44 +538,6 @@ function bindUI() {
     sbClient = null
   }
   $('#sb-test').onclick = () => testSupabase()
-  $('#sb-link').onclick = async () => {
-    const url = $('#sb-url').value.trim() || await getSetting('sbUrl') || ''
-    const key = $('#sb-key').value.trim() || await getSetting('sbKey') || ''
-    const proj = $('#sb-project').value.trim() || await getSetting('sbProject') || 'Rechnung Katha'
-    const base = location.origin + location.pathname
-    const link = base + '?sbUrl=' + encodeURIComponent(url) + '&sbKey=' + encodeURIComponent(key) + '&sbProject=' + encodeURIComponent(proj)
-    const wrap = document.createElement('div')
-    const h = document.createElement('h2')
-    h.textContent = 'Setup-Link'
-    const field = document.createElement('div')
-    field.className = 'field'
-    const lab = document.createElement('label')
-    lab.textContent = 'Link'
-    const inp = document.createElement('input')
-    inp.type = 'text'
-    inp.value = link
-    const actions = document.createElement('div')
-    actions.className = 'toolbar'
-    const copy = document.createElement('button')
-    copy.textContent = 'Kopieren'
-    copy.onclick = () => { inp.select(); document.execCommand('copy') }
-    actions.append(copy)
-    field.append(lab, inp)
-    wrap.append(h, field, actions)
-    modal(wrap)
-  }
-  $('#sb-share').onclick = async () => {
-    const url = $('#sb-url').value.trim() || await getSetting('sbUrl') || ''
-    const key = $('#sb-key').value.trim() || await getSetting('sbKey') || ''
-    const proj = $('#sb-project').value.trim() || await getSetting('sbProject') || 'Rechnung Katha'
-    const base = location.origin + location.pathname
-    const link = base + '?sbUrl=' + encodeURIComponent(url) + '&sbKey=' + encodeURIComponent(key) + '&sbProject=' + encodeURIComponent(proj)
-    if (navigator.share) {
-      try { await navigator.share({ title: 'Cloud Setup', text: 'Setup-Link', url: link }) } catch {}
-    } else {
-      alert(link)
-    }
-  }
 }
 async function init() {
   db = await openDB()
@@ -604,7 +572,11 @@ async function seedDefaults() {
     await setSetting('address', 'Kölner Str. 13, 50226 Frechen')
   }
   const proj = await getSetting('sbProject')
-  if (!proj) await setSetting('sbProject', 'Rechnung Katha')
+  if (!proj) await setSetting('sbProject', DEFAULT_SB_PROJECT)
+  const sbUrl = await getSetting('sbUrl')
+  if (!sbUrl) await setSetting('sbUrl', DEFAULT_SB_URL)
+  const sbKey = await getSetting('sbKey')
+  if (!sbKey) await setSetting('sbKey', DEFAULT_SB_KEY)
 }
 async function loadSettings() {
   $('#biz-name').value = (await getSetting('businessName')) || ''
