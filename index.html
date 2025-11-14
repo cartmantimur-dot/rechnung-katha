@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0B5B8C">
+  <title>Kleingewerbe Manager</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">Kleingewerbe</div>
+    <nav class="tabs">
+      <button data-tab="invoices" class="tab active">Rechnungen</button>
+      <button data-tab="inventory" class="tab">Warenbestand</button>
+      <button data-tab="receipts" class="tab">Belege</button>
+      <button data-tab="settings" class="tab">Einstellungen</button>
+    </nav>
+  </header>
+  <main id="view-root">
+    <section id="view-invoices" class="view visible">
+      <div class="toolbar">
+        <button id="new-invoice" class="primary">Neu</button>
+        <button id="export-invoices">Export</button>
+      </div>
+      <div id="invoice-list" class="list"></div>
+    </section>
+    <section id="view-inventory" class="view">
+      <div class="toolbar">
+        <button id="new-item" class="primary">Artikel</button>
+        <button id="export-inventory">Export</button>
+      </div>
+      <div id="inventory-list" class="list"></div>
+    </section>
+    <section id="view-receipts" class="view">
+      <div class="toolbar">
+        <button id="new-receipt" class="primary">Fotografieren</button>
+        <button id="export-receipts">Export</button>
+      </div>
+      <div id="receipts-grid" class="grid"></div>
+      <input id="receipt-input" type="file" accept="image/*" capture="environment" hidden>
+    </section>
+    <section id="view-settings" class="view">
+      <div class="card">
+        <h2>Firma</h2>
+        <div class="field"><label>Name</label><input id="biz-name" type="text"></div>
+        <div class="field"><label>Tagline</label><input id="biz-tagline" type="text"></div>
+        <div class="field"><label>Adresse</label><textarea id="biz-address"></textarea></div>
+        <div class="toolbar"><button id="biz-save" class="primary">Speichern</button></div>
+      </div>
+      <div class="card">
+        <h2>Cloud</h2>
+        <div class="field"><label>Projektname</label><input id="sb-project" type="text" placeholder="Rechnung Katha"></div>
+        <div class="field"><label>Supabase URL</label><input id="sb-url" type="url" placeholder="https://...supabase.co"></div>
+        <div class="field"><label>Supabase Anon Key</label><input id="sb-key" type="text" placeholder="anon-public-key"></div>
+        <div class="toolbar">
+          <button id="sb-save" class="primary">Speichern</button>
+          <button id="sb-test">Verbindung testen</button>
+          <button id="sb-link">Setup-Link</button>
+          <button id="sb-share">Teilen</button>
+          <div id="sb-status" style="margin-left:auto"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Backup</h2>
+        <button id="backup-all" class="primary">Alle Daten sichern</button>
+        <input id="restore-file" type="file" accept="application/json">
+        <button id="restore-all">Wiederherstellen</button>
+      </div>
+    </section>
+  </main>
+  <div id="modal" class="modal hidden"></div>
+  <script src="app.js" type="module"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(rs => rs.forEach(r => r.unregister()))
+      if (window.caches) caches.keys().then(keys => keys.forEach(k => caches.delete(k)))
+    }
+  </script>
+</body>
+</html>
